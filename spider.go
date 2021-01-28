@@ -3,9 +3,13 @@ package scrapedb
 import (
 	"fmt"
 	"github.com/dgraph-io/badger/v3"
+	"golang.org/x/net/proxy"
 	"io/ioutil"
+	"log"
+	"net"
 	"net/http"
 	"path/filepath"
+	"runtime"
 	"time"
 )
 
@@ -35,6 +39,39 @@ func NewSpider(db *DB, opts ...SpiderOpt) *Spider {
 
 func (s *Spider) GetSleepInterval() time.Duration {
 	return s.sleepInterval
+}
+
+func WithClient(client *http.Client) SpiderOpt {
+	return func(s *Spider) {
+		s.client = client
+	}
+}
+
+func WithSOCKS(proxyHost string) SpiderOpt {
+	return func(s *Spider) {
+		baseDialer := &net.Dialer{}
+		dialSocksProxy, err := proxy.SOCKS5("tcp", proxyHost, nil, baseDialer)
+		if err != nil {
+			log.Fatalf("Error creating proxy: %s", err)
+		}
+
+		contextDialer, ok := dialSocksProxy.(proxy.ContextDialer)
+		if !ok {
+			log.Fatalf("Non DialContext type assertion: %T", dialSocksProxy)
+		}
+
+		s.client = &http.Client{
+			Transport: &http.Transport{
+				Proxy:                 http.ProxyFromEnvironment,
+				DialContext:           contextDialer.DialContext,
+				MaxIdleConns:          10,
+				IdleConnTimeout:       60 * time.Second,
+				TLSHandshakeTimeout:   10 * time.Second,
+				ExpectContinueTimeout: 1 * time.Second,
+				MaxIdleConnsPerHost:   runtime.GOMAXPROCS(0) + 1,
+			},
+		}
+	}
 }
 
 func WithUserAgent(userAgent string) SpiderOpt {
